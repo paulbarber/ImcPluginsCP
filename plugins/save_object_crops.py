@@ -31,21 +31,21 @@ import cellprofiler.measurement as cpmeas
 import cellprofiler.setting as cps
 from cellprofiler.setting import YES, NO
 import cellprofiler.preferences as cpp
-from cellprofiler.preferences import \
+from cellprofiler.setting import \
      standardize_default_folder_names, DEFAULT_INPUT_FOLDER_NAME, \
      DEFAULT_OUTPUT_FOLDER_NAME, ABSOLUTE_FOLDER_NAME, \
      DEFAULT_INPUT_SUBFOLDER_NAME, DEFAULT_OUTPUT_SUBFOLDER_NAME, \
      get_default_image_directory
 #from cellprofiler.utilities.relpath import relpath
-from cellprofiler.modules.loadimages import C_FILE_NAME, C_PATH_NAME, C_URL
-from cellprofiler.modules.loadimages import \
+from cellprofiler.measurement import C_FILE_NAME, C_PATH_NAME, C_URL
+from cellprofiler.measurement import \
      C_OBJECTS_FILE_NAME, C_OBJECTS_PATH_NAME, C_OBJECTS_URL
 from cellprofiler.modules.loadimages import pathname2url
 from centrosome.cpmorphology import distance_color_labels
 from bioformats.formatwriter import write_image
 import bioformats.omexml as ome
 
-import tifffile
+import skimage.io as io
 
 NOTDEFINEDYET = 'Helptext Not Defined Yet'
 USING_METADATA_TAGS_REF = NOTDEFINEDYET
@@ -408,10 +408,11 @@ class SaveObjectCrops(cpm.Module):
 
             fn = os.path.join(folder, basename + '_l' + str(lab + 1) + '_x' + str(x) + '_y' + str(y)+'.tiff')
 
-            with tifffile.TiffWriter(fn, imagej=True) as tif:
-                timg = img_stack[exsl]
-                for chan in range(timg.shape[0]):
-                    tif.save(timg[chan, :, :].squeeze())
+            timg = img_stack[exsl]
+            io.imsave(fn, timg, plugin='tifffile', imagej=True)
+            # with tifffile.TiffWriter(fn, imagej=True) as tif:
+            #    for chan in range(timg.shape[0]):
+            #        tif.save(timg[chan, :, :].squeeze())
 
     def save_crops(self, workspace):
         """ Crops the image by objects """
@@ -676,118 +677,3 @@ class SaveImagesDirectoryPath(cps.DirectoryPath):
         if self.dir_choice not in self.dir_choices:
             raise cps.ValidationError("%s is not a valid directory option" %
                                       self.dir_choice, self)
-
-    @staticmethod
-    def upgrade_setting(value):
-        '''Upgrade setting from previous version'''
-        dir_choice, custom_path = cps.DirectoryPath.split_string(value)
-        if dir_choice in OLD_PC_WITH_IMAGE_VALUES:
-            dir_choice = PC_WITH_IMAGE
-        elif dir_choice in (PC_CUSTOM, PC_WITH_METADATA):
-            if custom_path.startswith('.'):
-                dir_choice = cps.DEFAULT_OUTPUT_SUBFOLDER_NAME
-            elif custom_path.startswith('&'):
-                dir_choice = cps.DEFAULT_INPUT_SUBFOLDER_NAME
-                custom_path = '.' + custom_path[1:]
-            else:
-                dir_choice = cps.ABSOLUTE_FOLDER_NAME
-        else:
-            return cps.DirectoryPath.upgrade_setting(value)
-        return cps.DirectoryPath.static_join_string(dir_choice, custom_path)
-
-def save_bmp(path, img):
-    '''Save an image as a Microsoft .bmp file
-
-    path - path to file to save
-
-    img - either a 2d, uint8 image or a 2d + 3 plane uint8 RGB color image
-
-    Saves file as an uncompressed 8-bit or 24-bit .bmp image
-    '''
-    #
-    # Details from
-    # http://en.wikipedia.org/wiki/BMP_file_format#cite_note-DIBHeaderTypes-3
-    #
-    # BITMAPFILEHEADER
-    # http://msdn.microsoft.com/en-us/library/dd183374(v=vs.85).aspx
-    #
-    # BITMAPINFOHEADER
-    # http://msdn.microsoft.com/en-us/library/dd183376(v=vs.85).aspx
-    #
-    BITMAPINFOHEADER_SIZE = 40
-    img = img.astype(np.uint8)
-    w = img.shape[1]
-    h = img.shape[0]
-    #
-    # Convert RGB to interleaved
-    #
-    if img.ndim == 3:
-        rgb = True
-        #
-        # Compute padded raster length
-        #
-        raster_length = (w * 3 + 3) & ~ 3
-        tmp = np.zeros((h, raster_length), np.uint8)
-        #
-        # Do not understand why but RGB is BGR
-        #
-        tmp[:, 2:(w*3):3] = img[:, :, 0]
-        tmp[:, 1:(w*3):3] = img[:, :, 1]
-        tmp[:, 0:(w*3):3] = img[:, :, 2]
-        img = tmp
-    else:
-        rgb = False
-        if w % 4 != 0:
-            raster_length = (w + 3) & ~ 3
-            tmp = np.zeros((h, raster_length), np.uint8)
-            tmp[:, :w] = img
-            img = tmp
-    #
-    # The image is upside-down in .BMP
-    #
-    bmp = np.ascontiguousarray(np.flipud(img)).data
-    with open(path, "wb") as fd:
-        def write2(value):
-            '''write a two-byte little-endian value to the file'''
-            fd.write(np.array([value], "<u2").data[:2])
-        def write4(value):
-            '''write a four-byte little-endian value to the file'''
-            fd.write(np.array([value], "<u4").data[:4])
-        #
-        # Bitmap file header (1st pass)
-        # byte
-        # 0-1 = "BM"
-        # 2-5 = length of file
-        # 6-9 = 0
-        # 10-13 = offset from beginning of file to bitmap bits
-        fd.write("BM")
-        length = 14 # BITMAPFILEHEADER
-        length += BITMAPINFOHEADER_SIZE
-        if not rgb:
-            length += 4 * 256         # 256 color table entries
-        hdr_length = length
-        length += len(bmp)
-        write4(length)
-        write4(0)
-        write4(hdr_length)
-        #
-        # BITMAPINFOHEADER
-        #
-        write4(BITMAPINFOHEADER_SIZE) # biSize
-        write4(w)                     # biWidth
-        write4(h)                     # biHeight
-        write2(1)                     # biPlanes = 1
-        write2(24 if rgb else 8)      # biBitCount
-        write4(0)                     # biCompression = BI_RGB
-        write4(len(bmp))              # biSizeImage
-        write4(7200)                  # biXPelsPerMeter
-        write4(7200)                  # biYPelsPerMeter
-        write4(0 if rgb else 256)     # biClrUsed (no palette)
-        write4(0)                     # biClrImportant
-        if not rgb:
-            # The color table
-            color_table = np.column_stack(
-                [np.arange(256)]* 3 +
-                [np.zeros(256, np.uint32)]).astype(np.uint8)
-            fd.write(np.ascontiguousarray(color_table, np.uint8).data)
-        fd.write(bmp)
