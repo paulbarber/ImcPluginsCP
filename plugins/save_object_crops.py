@@ -46,6 +46,7 @@ from bioformats.formatwriter import write_image
 import bioformats.omexml as ome
 
 import skimage.io as io
+import skimage
 
 NOTDEFINEDYET = 'Helptext Not Defined Yet'
 USING_METADATA_TAGS_REF = NOTDEFINEDYET
@@ -305,6 +306,7 @@ class SaveObjectCrops(cpm.Module):
         else:
             raise NotImplementedError("Unhandled file name method: %s"%(self.file_name_method))
         result.append(self.file_format)
+        result.append(self.bit_depth)
         result.append(self.pathname)
         result.append(self.overwrite)
         result.append(self.update_file_names)
@@ -433,6 +435,14 @@ class SaveObjectCrops(cpm.Module):
         object_extension = self.object_extension.value
         if filename is None:  # failed overwrite check
             return
+
+        if self.get_bit_depth() == BIT_DEPTH_8:
+            pixels = skimage.util.img_as_ubyte(pixels)
+        elif self.get_bit_depth() == BIT_DEPTH_16:
+            pixels = skimage.util.img_as_uint(pixels)
+        elif self.get_bit_depth() == BIT_DEPTH_FLOAT:
+            # like this it also works for images outside -1, 1
+            pixels = pixels.astype(numpy.float32)
 
         slices = ndi.find_objects(objects.segmented)
         slices, labels = zip(*[(s, label) for label, s  in
@@ -611,11 +621,7 @@ class SaveObjectCrops(cpm.Module):
         return self.file_format.value
 
     def get_bit_depth(self):
-        if (self.save_image_or_figure == IF_IMAGE and
-            self.get_file_format() in FF_SUPPORTING_16_BIT):
-            return self.bit_depth.value
-        else:
-            return BIT_DEPTH_8
+        return self.bit_depth.value
 
     def upgrade_settings(self, setting_values, variable_revision_number,
                          module_name, from_matlab):
