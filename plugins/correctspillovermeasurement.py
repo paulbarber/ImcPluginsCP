@@ -277,6 +277,9 @@ class CorrectSpilloverMeasurements(cpm.Module):
         # only compensate cells with all finite measurements
         fil = np.all(np.isfinite(dat), 1)
         compdat = dat.copy()
+        if np.sum(fil) == 0:
+            # if there are no cells, nothing needs to be compensated.
+            return compdat
         if method == METHOD_LS:
             compdat[fil, :] = self.compensate_ls(dat[fil, :], sm)
         if method == METHOD_NNLS:
@@ -292,7 +295,7 @@ class CorrectSpilloverMeasurements(cpm.Module):
     @staticmethod
     def compensate_nnls(dat, sm):
         def nnls(x):
-            return spo.nnls(sm.T, x, rcond=None)[0]
+            return spo.nnls(sm.T, x)[0]
         return np.apply_along_axis(nnls,1, dat)
 
 
